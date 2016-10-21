@@ -11,6 +11,10 @@
 
 @property (nonatomic, copy) NSString *name;
 @property (nonatomic, strong) NSString *avatar;
+// 创建Cell类型
+@property (nonatomic, copy) NSString * cellClassName;
+// 返回tableViewCell
+- (UITableViewCell *)createdTableViewCell:(UITableView *)tableView;
 
 @end
 ```
@@ -58,197 +62,26 @@
 
 ```
 下面我们在UITableView的delegate来处理展示Cell
-
-**第一次尝试：**
-
-```
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    BaseCell *cell;
-    NSString *cellIdentifier;
-
-    switch (p.showtype) {
-        case PersonShowText:
-            cellIdentifier = @"TextCell";
-            break;
-        case PersonShowAvatar:
-            cellIdentifier = @"PersonShowAvatar";
-            break;
-        case PersonShowTextAndAvatar:
-            cellIdentifier = @"PersonShowTextAndAvatar";
-            break;
-        default:
-            break;
-    }
-    
-    cell = [tableView dequeueReusableCellWithIdentifier:cellIdentifier];
-    
-    if (!cell) {
-        switch (p.showtype) {
-            case PersonShowText:
-                cell = [[TextCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellIdentifier];
-                break;
-            case PersonShowAvatar:
-                cell = [[ImageCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellIdentifier];
-                break;
-            case PersonShowTextAndAvatar:
-                cell = [[TextImageCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellIdentifier];
-                break;
-            default:
-                break;
-        }
-    }
-    
-    [cell setPerson:p];
-    return cell;
-}
-```
-这段代码实现了根据不同的业务模型选取和显示Cell的逻辑。但是这段代码包含了重复代码，switch case被调用了两次。我们改进一下代码：
-
-**第二次尝试**
-
-```
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    BaseCell *cell;
-    NSString *cellIdentifier;
-
-	Class cellClass;
-    switch (p.showtype) {
-        case PersonShowText:
-            cellClass = [TextCell class];
-            break;
-        case PersonShowAvatar:
-            cellClass = [ImageCell class];
-            break;
-        case PersonShowTextAndAvatar:
-            cellClass = [TextImageCell class];
-            break;
-        default:
-            cellClass = [UITableViewCell class];
-            break;
-    }
-    
-    cellIdentifier = NSStringFromClass(cellClass);
-
-    cell = [tableView dequeueReusableCellWithIdentifier:cellIdentifier];
-    if (!cell) {
-        cell = [[cellClass alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellIdentifier];
-    }
-    
-    [cell setPerson:p];
-    
-    return cell;
-}
-
-```
-
-这次比第一次的代码看起来好了不少，通过一个通用的Class对象，来动态生成cell，避免了两次调用switch case的重复代码。但是，有没有更好的实现方式？
-
-**第三次尝试**
-
-```
-- (void)viewDidLoad 
-{
-	...
-	[self registerCell];  //注册cell
-}
-```
-
-```
-- (void)registerCell
-{
-    [_tableView registerClass:[TextCell class] forCellReuseIdentifier:NSStringFromClass([TextCell class])];
-    [_tableView registerClass:[ImageCell class] forCellReuseIdentifier:NSStringFromClass([ImageCell class])];
-    [_tableView registerClass:[TextImageCell class] forCellReuseIdentifier:NSStringFromClass([TextImageCell class])];
-}
-
-```
-```
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     Person *p = _persons[indexPath.row];
-    BaseCell *cell;
-    NSString *cellIdentifier;
+    return [p createdTableViewCell:tableView];
+}
 
-    switch (p.showtype) {
-        case PersonShowText:
-            cellIdentifier = NSStringFromClass([TextCell class]);
-            break;
-        case PersonShowAvatar:
-            cellIdentifier = NSStringFromClass([ImageCell class]);
-            break;
-        case PersonShowTextAndAvatar:
-            cellIdentifier = NSStringFromClass([TextImageCell class]);
-            break;
-        default:
-            cellIdentifier = NSStringFromClass([UITableViewCell class]);
-            break;
+Person模型类创建cell赋值数据
+// 返回tableViewCell
+- (UITableViewCell *)createdTableViewCell:(UITableView *)tableView;
+{
+    NSString *cellIdentifier = self.cellClassName;
+
+    BaseCell *cell = [tableView dequeueReusableCellWithIdentifier:cellIdentifier];
+    if (!cell) {
+         cell = [[[NSClassFromString(cellIdentifier) class] alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellIdentifier];
     }
-    
-    cell = [tableView dequeueReusableCellWithIdentifier:cellIdentifier forIndexPath:indexPath];
-        
-    [cell setPerson:p];
-    
+    [cell setPerson:self];
     return cell;
 }
-
-```
-
-可以看到，这次我们调用了 `- (void)registerClass:(nullable Class)cellClass forCellReuseIdentifier:(NSString *)identifier` 方法，把tableView和cell先配置好，并且在`cellForRowAtIndexPath`方法里面，去掉了`if (!cell) {...}`的处理，代码看起来更加简洁。
-
-为什么不再需要判断cell是否为空？因为通过`registerClass`方法注册了cell之后，`dequeueReusableCellWithIdentifier:(NSString *)identifier forIndexPath:(NSIndexPath *)indexPath` 方法会确保有一个**可用**的cell返回。
-
-当然，我们可以把类型判断的这段代码提取出来，让`cellForRowAtIndexPath`方法看起来更加简洁
-
-```
-@interface Person : NSObject
-
-......
-@property (nonatomic, strong) NSString *cellIdentifier;
-
-@end
-
-```
-
-```
-@implementation Person
-
-- (NSString *)cellIdentifier
-{
-    if (_showtype == PersonShowTextAndAvatar) {
-        return NSStringFromClass([TextImageCell class]);
-    } else if (_showtype == PersonShowAvatar){
-        return NSStringFromClass([ImageCell class]);
-    } else {
-        return NSStringFromClass([TextCell class]);
-    }
-}
-
-@end
-
-```
-现在`cellForRowAtIndexPath`方法看起来就像下面这样，明显简洁多了
-
-```
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    Person *p = _persons[indexPath.row];
-    BaseCell *cell;
-    NSString *cellIdentifier;
-
-    cellIdentifier = p.cellIdentifier;
-    
-    cell = [tableView dequeueReusableCellWithIdentifier:cellIdentifier forIndexPath:indexPath];
-        
-    [cell setPerson:p];
-    
-    return cell;
-}
-
-```
 
 **结论：**
-
-使用 `- (void)registerClass:(nullable Class)cellClass forCellReuseIdentifier:(NSString *)identifier` 和 `- (UITableViewCell *)dequeueReusableCellWithIdentifier:(NSString *)identifier forIndexPath:(NSIndexPath *)indexPath` 可以让UITableView处理多种类型的cell更加灵活和轻松。
+模型创建cell，控制器基本没有代码处理，更加简洁
 
